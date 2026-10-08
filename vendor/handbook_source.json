@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/Fraud-Detection-Handbook/fraud-detection-handbook",
+  "revision": "81cf7d1714bb7b2f5b496407d9055d91dc68dc25",
+  "license": "GPL-3.0-or-later",
+  "notebooks": [
+    {
+      "path": "Chapter_3_GettingStarted/SimulatedDataset.ipynb",
+      "sha256": "3906c03740e37ecf1606f548fa937a2e8664127f76a54edad43d1bd64e9a731b"
+    },
+    {
+      "path": "Chapter_3_GettingStarted/BaselineFeatureTransformation.ipynb",
+      "sha256": "845007d9e9e92404c53c02d8858e2f3cad76ebb37cc2eea0c986e63bc672d3b8"
+    }
+  ]
+}
