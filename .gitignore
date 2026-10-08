@@ -1,5 +1,10 @@
 .deps/
+.r-library/
+.test_tmp/
 .venv/
 __pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
 results*/
 data/
