@@ -55,7 +55,8 @@ class HandbookTests(unittest.TestCase):
 
     def test_mapping_order_and_feature_whitelist(self):
         result, mapping = convert_day(source_frame(), date(2018, 4, 1))
-        self.assertEqual(result.columns.tolist(), ["CARD_ID", *FEATURES, "y"])
+        self.assertEqual(result.columns.tolist(), ["CARD_ID", *FEATURES, "TERMINAL_ID", "y"])
+        self.assertEqual(result.TERMINAL_ID.tolist(), ["20", "10"])
         self.assertEqual(result.CARD_ID.tolist(), ["A6", "02"])
         self.assertEqual(result.y.tolist(), [0, 1])
         self.assertEqual(mapping.TRANSACTION_ID.tolist(), [1, 2])

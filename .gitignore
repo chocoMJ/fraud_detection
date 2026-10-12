@@ -1,6 +1,4 @@
-.deps/
 .r-library/
-.test_tmp/
 .venv/
 __pycache__/
 *.py[cod]
