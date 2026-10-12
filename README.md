@@ -6,6 +6,35 @@ Carcillo 관련 저장소의 `main.R`을 참고한 **오류 수정 baseline**이
 
 ## 구조
 
+### 터미널 특성 확장
+
+기본 pickle 실행은 기존 12개 수치 특성에 다음을 추가한다.
+
+- `TERMINAL_ID`: 원핫 인코딩하는 범주형 식별자. 번호 크기를 수치로 학습하지 않는다.
+  인코더는 학습 데이터에서만 학습하며 처음 보는 터미널은 해당 원핫 부분을 0으로 처리한다.
+- 최근 1·7·30일 각각의 전체 관측 거래 횟수, 라벨 확보 거래 횟수,
+  확인된 사기 거래 횟수, 확보 라벨 중 사기 비율: 총 12개 수치 특성.
+
+따라서 인코딩 전 입력은 수치 24개 + 범주형 1개이며, 원핫 변환 후 열 수는 학습 터미널 수에 따라 달라진다.
+`terminal_history.py`에서 날짜별로 계산한다. 당일은 제외하고 직전 달력 일수를 사용한다.
+초기 학습 기간은 전체 라벨, 이후는 조사 대상으로 선정된 카드의 라벨만 다음 날부터 반영한다.
+미조사 거래는 사기 건수나 사기 비율에 사용하지 않는다. 과거 학습 행의 특성도 나중에 얻은 라벨로 덮어쓰지 않는다.
+라벨이 없으면 비율은 0이며, 라벨 확보 건수를 함께 제공해 실제 0%와 구분할 수 있게 한다.
+이 비율은 조사된 거래에 대한 비율이므로 터미널 전체의 실제 사기율과는 다를 수 있다.
+전체 관측 거래 횟수는 차단 카드의 입력 거래도 포함한다. 기존 12개 특성과 공식 가공 거래 횟수는 유지하며,
+공식 `TERMINAL_ID_RISK_*` 열은 사용하지 않는다. 고객 ID는 여전히 카드 묶음·조사용이며 모델 입력에 넣지 않는다.
+
+```powershell
+# 터미널 확장 모델 (기본값)
+python -m demo_py.run --strategies N --output-dir demo_py/results/terminal_N
+# 같은 데이터에서 기존 12개 특성으로 비교
+python -m demo_py.run --strategies N --no-terminal-features --output-dir demo_py/results/baseline_N
+```
+
+다른 데이터셋은 두 명령에 같은 `--data-dir`을 지정한다. 기본 결과 폴더에는 확장 실행 시
+`_terminal_history` 접미사를 붙인다. `--features`를 직접 지정하면 `TERMINAL_ID` 포함 여부로
+터미널 이력 추가를 결정한다. 과거 CSV에 터미널 ID가 없으면 기존 수치 특성으로 실행되므로 pickle 입력을 권장한다.
+
 ```text
 demo_py/
   data.py             일별 CSV 및 Handbook pickle 직접 로딩·검증
@@ -46,8 +75,6 @@ python -m venv demo_py/.venv
 VS Code/PyCharm에서는 Python 인터프리터를 `demo_py/.venv/Scripts/python.exe`로 선택하고
 `run.py`를 실행한다. 인자 없이 실행하면 N/R/U를 모두 실행한다.
 이하 `python` 명령은 해당 가상환경의 Python 또는 필요한 패키지가 설치된 Python을 뜻한다.
-`run_local.ps1`은 선택적인 호환용 도구이며 로컬 가상환경, 없으면 PATH의 Python을 사용한다.
-Codex 내장 Python이나 `.deps`는 실행에 사용하지 않는다.
 
 ## Handbook 데이터 연결
 

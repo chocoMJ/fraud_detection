@@ -2,6 +2,20 @@
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.pipeline import Pipeline
+
+
+def categorical_model(estimator, features):
+    """Fit categories only on training rows; unseen terminals encode as all-zero."""
+    if "TERMINAL_ID" not in features:
+        return estimator
+    transform = ColumnTransformer([
+        ("terminal", OneHotEncoder(handle_unknown="ignore", sparse_output=True), ["TERMINAL_ID"]),
+        ("numeric", "passthrough", [f for f in features if f != "TERMINAL_ID"]),
+    ], sparse_threshold=1.0)
+    return Pipeline([("features", transform), ("classifier", estimator)])
 
 
 def positive_probability(model, x):
@@ -37,6 +51,7 @@ class InitialEnsemble:
                 else:
                     train = frame
                 tree = DecisionTreeClassifier(random_state=int(rng.integers(2**31 - 1)))
+                tree = categorical_model(tree, features)
                 tree.fit(train[features], train.y)
                 self.models.append(tree)
         if not self.models:
@@ -52,5 +67,6 @@ def fit_forest(frame, features, trees=500, seed=42):
         n_estimators=trees, max_features="sqrt", bootstrap=True,
         random_state=seed, n_jobs=1,
     )
+    model = categorical_model(model, features)
     model.fit(frame[features], frame.y)
     return model

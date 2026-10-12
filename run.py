@@ -13,7 +13,8 @@ import numpy as np
 import pandas as pd
 import sklearn
 
-from demo_py.data import load_days, load_handbook_days, handbook_source_directory
+from demo_py.data import FEATURES, load_days, load_handbook_days, handbook_source_directory
+from demo_py.terminal_history import model_features
 from demo_py.simulation import Config, config_dict, simulate
 
 
@@ -29,6 +30,8 @@ def main():
     parser.add_argument("--strategies", nargs="+", choices=["N", "R", "U"], default=["N", "R", "U"])
     parser.add_argument("--seeds", nargs="+", type=int, default=[42])
     parser.add_argument("--features", nargs="+")
+    parser.add_argument("--no-terminal-features", action="store_true",
+                        help="Use only the original 12 numeric features for baseline comparison")
     parser.add_argument("--warmup-days", type=int, default=7)
     parser.add_argument("--window-days", type=int, default=7)
     parser.add_argument("--budget", type=int, default=100)
@@ -37,6 +40,10 @@ def main():
     parser.add_argument("--forest-trees", type=int, default=500)
     parser.add_argument("--block-cards", action="store_true")
     args = parser.parse_args()
+    if args.no_terminal_features:
+        if args.features is not None:
+            parser.error("Use either --features or --no-terminal-features")
+        args.features = list(FEATURES)
 
     input_format = args.input_format
     
@@ -44,6 +51,8 @@ def main():
         args.data_dir = root / ("data/handbook/scenario1_only" if input_format == "pkl" else "data/handbook/daily")
     if args.output_dir is None:
         output_name = "scenario1_only" if args.data_dir.resolve() == (root / "data/handbook/scenario1_only").resolve() else "handbook"
+        if not args.no_terminal_features and (args.features is None or "TERMINAL_ID" in args.features):
+            output_name += "_terminal_history"
         args.output_dir = root / "results" / output_name
     if input_format == "pkl":
         args.data_dir = handbook_source_directory(args.data_dir)
@@ -91,7 +100,18 @@ def main():
                        "ncp_denominator": "min(configured_budget, daily_fraud_cards)",
                        "card_label": "any_fraud_transaction", "ranking_population": "all_eligible_cards",
                        "summary_aggregation": "daily_mean_excluding_nan"},
-        "data_dir": str(args.data_dir.resolve()), "features": features,
+        "data_dir": str(args.data_dir.resolve()), "input_features": features,
+        "features": model_features(features),
+        "terminal_features": {
+            "enabled": "TERMINAL_ID" in features,
+            "encoding": "one_hot_training_categories_only; unseen=all_zero",
+            "windows_calendar_days": [1, 7, 30],
+            "availability": "previous days only; full warmup labels then selected-card labels",
+            "observed_counts": "all incoming transactions including blocked cards",
+            "fraud_rate_denominator": "labeled transactions; zero when none; labeled count supplied separately",
+            "training_history": "features frozen at original prediction time",
+            "official_terminal_risk_columns": "not used",
+        },
         "dataset": "handbook", "max_days": args.max_days,
         "input_format": input_format,
         "configs": configs, "strategies": list(dict.fromkeys(args.strategies)),

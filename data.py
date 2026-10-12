@@ -10,6 +10,7 @@ FEATURES = ["TX_AMOUNT", "TX_DURING_WEEKEND", "TX_DURING_NIGHT"] + [
     f"CUSTOMER_ID_{kind}_{window}DAY_WINDOW"
     for window in (1, 7, 30) for kind in ("NB_TX", "AVG_AMOUNT")
 ] + [f"TERMINAL_ID_NB_TX_{window}DAY_WINDOW" for window in (1, 7, 30)]
+DEFAULT_FEATURES = [*FEATURES, "TERMINAL_ID"]
 
 
 """
@@ -36,7 +37,7 @@ def read_official_pickle(path):
             return LegacyIndexUnpickler(stream).load()
 
 def convert_day(frame, expected_date):
-    required = {"CUSTOMER_ID", "TX_FRAUD", "TX_DATETIME", "TRANSACTION_ID", *FEATURES}
+    required = {"CUSTOMER_ID", "TERMINAL_ID", "TX_FRAUD", "TX_DATETIME", "TRANSACTION_ID", *FEATURES}
     missing = required - set(frame.columns)
     if missing:
         raise ValueError(f"Missing Handbook columns: {sorted(missing)}")
@@ -50,10 +51,13 @@ def convert_day(frame, expected_date):
     if frame.CUSTOMER_ID.isna().any() or not frame.TX_FRAUD.isin([0, 1]).all():
         raise ValueError("Invalid customer identifier or fraud label")
     ordered = frame.assign(TX_DATETIME=timestamps).sort_values(["TX_DATETIME", "TRANSACTION_ID"])
-    output = ordered[["CUSTOMER_ID", *FEATURES, "TX_FRAUD"]].rename(
+    output = ordered[["CUSTOMER_ID", *DEFAULT_FEATURES, "TX_FRAUD"]].rename(
         columns={"CUSTOMER_ID": "CARD_ID", "TX_FRAUD": "y"}
     ).reset_index(drop=True)
     output["CARD_ID"] = output.CARD_ID.astype("string")
+    output["TERMINAL_ID"] = output.TERMINAL_ID.astype("string")
+    if output.TERMINAL_ID.isna().any() or output.TERMINAL_ID.str.strip().eq("").any():
+        raise ValueError("Missing terminal identifier")
     if output.CARD_ID.str.strip().eq("").any():
         raise ValueError("Empty customer identifier")
     output[FEATURES] = output[FEATURES].apply(pd.to_numeric, errors="raise")
@@ -81,9 +85,9 @@ def load_handbook_days(directory, features=None):
     paths = sorted(directory.glob("*.pkl"))
     if not paths:
         raise ValueError(f"No Handbook .pkl files in {directory}")
-    columns = list(features) if features is not None else list(FEATURES)
-    if not columns or len(set(columns)) != len(columns) or not set(columns).issubset(FEATURES):
-        raise ValueError("Handbook features must be a nonempty unique subset of the 12 approved features")
+    columns = list(features) if features is not None else list(DEFAULT_FEATURES)
+    if not columns or len(set(columns)) != len(columns) or not set(columns).issubset(DEFAULT_FEATURES):
+        raise ValueError("Handbook features must be a unique subset of the 12 numeric features and TERMINAL_ID")
     days, seen_ids = [], set()
     first_date = None
     for path in paths:
@@ -117,7 +121,7 @@ def load_days(directory: Path, features=None):
     days = []
     columns = list(features) if features else None
     for number, path in numbered:
-        frame = pd.read_csv(path, dtype={"CARD_ID": "string"})
+        frame = pd.read_csv(path, dtype={"CARD_ID": "string", "TERMINAL_ID": "string"})
         if not {"CARD_ID", "y"}.issubset(frame.columns):
             raise ValueError(f"{path.name}: requires CARD_ID and y")
         if columns is None:
@@ -133,8 +137,12 @@ def load_days(directory: Path, features=None):
         if not frame.y.isin([0, 1]).all():
             raise ValueError(f"{path.name}: y must be 0 or 1")
         frame = frame[["CARD_ID", *columns, "y"]].copy()
-        frame[columns] = frame[columns].apply(pd.to_numeric, errors="raise")
-        if not np.isfinite(frame[columns].to_numpy(dtype=float)).all():
+        numeric = [c for c in columns if c != "TERMINAL_ID"]
+        if "TERMINAL_ID" in columns:
+            if frame.TERMINAL_ID.isna().any() or frame.TERMINAL_ID.str.strip().eq("").any():
+                raise ValueError(f"{path.name}: missing TERMINAL_ID")
+        frame[numeric] = frame[numeric].apply(pd.to_numeric, errors="raise")
+        if not np.isfinite(frame[numeric].to_numpy(dtype=float)).all():
             raise ValueError(f"{path.name}: features must be finite numeric values")
         frame["y"] = frame.y.astype(int)
         days.append((number, path.name, frame))

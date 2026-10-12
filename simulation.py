@@ -7,6 +7,7 @@ import pandas as pd
 from .evaluation import evaluate
 from .model import InitialEnsemble, fit_forest, positive_probability
 from .strategies import select_cards
+from .terminal_history import TerminalHistory, model_features
 
 
 @dataclass(frozen=True)
@@ -37,7 +38,14 @@ def simulate(days, features, strategy, config):
     numbers = [n for n, _, _ in days]
     if numbers != sorted(set(numbers)):
         raise ValueError("Days must be unique and chronological")
-    history = [(n, f.copy()) for n, _, f in days[:config.warmup_days]]
+    terminal_history = TerminalHistory() if "TERMINAL_ID" in features else None
+    features = model_features(features)
+    history = []
+    for n, _, f in days[:config.warmup_days]:
+        enriched = terminal_history.transform(n, f) if terminal_history else f.copy()
+        history.append((n, enriched))
+        if terminal_history:
+            terminal_history.observe(n, f, f)
     rng = np.random.default_rng(config.seed)
     banned = set()
     records, selections = [], []
@@ -59,6 +67,8 @@ def simulate(days, features, strategy, config):
         elif model is None:
             raise ValueError("No labeled training rows in the initial window")
         frame = full_frame[~full_frame.CARD_ID.isin(banned)].copy().reset_index(drop=True)
+        if terminal_history:
+            frame = terminal_history.transform(number, frame)
         scores = (model.predict(frame) if model_kind == "initial_ensemble"
                   else positive_probability(model, frame[features]))
         selected = select_cards(frame.CARD_ID, scores, strategy, config.budget, config.exploration, rng)
@@ -78,6 +88,8 @@ def simulate(days, features, strategy, config):
         selected.insert(0, "strategy", strategy)
         selections.append(selected)
         history.append((number, revealed))
+        if terminal_history:
+            terminal_history.observe(number, full_frame, revealed)
         if config.block_cards:
             banned.update(revealed.loc[revealed.y.eq(1), "CARD_ID"])
     return pd.DataFrame(records), pd.concat(selections, ignore_index=True)
