@@ -10,7 +10,6 @@ FEATURES = ["TX_AMOUNT", "TX_DURING_WEEKEND", "TX_DURING_NIGHT"] + [
     f"CUSTOMER_ID_{kind}_{window}DAY_WINDOW"
     for window in (1, 7, 30) for kind in ("NB_TX", "AVG_AMOUNT")
 ] + [f"TERMINAL_ID_NB_TX_{window}DAY_WINDOW" for window in (1, 7, 30)]
-DEFAULT_FEATURES = [*FEATURES, "TERMINAL_ID"]
 
 
 """
@@ -51,7 +50,7 @@ def convert_day(frame, expected_date):
     if frame.CUSTOMER_ID.isna().any() or not frame.TX_FRAUD.isin([0, 1]).all():
         raise ValueError("Invalid customer identifier or fraud label")
     ordered = frame.assign(TX_DATETIME=timestamps).sort_values(["TX_DATETIME", "TRANSACTION_ID"])
-    output = ordered[["CUSTOMER_ID", *DEFAULT_FEATURES, "TX_FRAUD"]].rename(
+    output = ordered[["CUSTOMER_ID", *FEATURES, "TERMINAL_ID", "TX_FRAUD"]].rename(
         columns={"CUSTOMER_ID": "CARD_ID", "TX_FRAUD": "y"}
     ).reset_index(drop=True)
     output["CARD_ID"] = output.CARD_ID.astype("string")
@@ -85,9 +84,9 @@ def load_handbook_days(directory, features=None):
     paths = sorted(directory.glob("*.pkl"))
     if not paths:
         raise ValueError(f"No Handbook .pkl files in {directory}")
-    columns = list(features) if features is not None else list(DEFAULT_FEATURES)
-    if not columns or len(set(columns)) != len(columns) or not set(columns).issubset(DEFAULT_FEATURES):
-        raise ValueError("Handbook features must be a unique subset of the 12 numeric features and TERMINAL_ID")
+    columns = list(features) if features is not None else list(FEATURES)
+    if not columns or len(set(columns)) != len(columns) or not set(columns).issubset(FEATURES):
+        raise ValueError("Handbook model features must be a unique subset of the 12 numeric features")
     days, seen_ids = [], set()
     first_date = None
     for path in paths:
@@ -101,7 +100,8 @@ def load_handbook_days(directory, features=None):
         seen_ids.update(ids)
         if first_date is None:
             first_date = day
-        days.append(((day - first_date).days + 1, path.name, frame[["CARD_ID", *columns, "y"]]))
+        days.append(((day - first_date).days + 1, path.name,
+                     frame[["CARD_ID", *columns, "TERMINAL_ID", "y"]]))
     return days, columns
 
 
@@ -125,24 +125,25 @@ def load_days(directory: Path, features=None):
         if not {"CARD_ID", "y"}.issubset(frame.columns):
             raise ValueError(f"{path.name}: requires CARD_ID and y")
         if columns is None:
-            columns = [c for c in frame if c not in {"CARD_ID", "y"}]
-        if not columns or len(set(columns)) != len(columns) or set(columns) & {"CARD_ID", "y"}:
-            raise ValueError("Features must be unique and exclude CARD_ID and y")
+            columns = [c for c in frame if c not in {"CARD_ID", "TERMINAL_ID", "y"}]
+        if (not columns or len(set(columns)) != len(columns)
+                or set(columns) & {"CARD_ID", "TERMINAL_ID", "y"}):
+            raise ValueError("Features must be unique and exclude identifiers and y")
         if not set(columns).issubset(frame.columns):
             raise ValueError(f"{path.name}: missing features")
-        if features is None and set(frame.columns) != set(columns) | {"CARD_ID", "y"}:
+        metadata = {"TERMINAL_ID"} if "TERMINAL_ID" in frame.columns else set()
+        if features is None and set(frame.columns) != set(columns) | {"CARD_ID", "y"} | metadata:
             raise ValueError(f"{path.name}: inconsistent columns")
         if frame.CARD_ID.isna().any() or frame.CARD_ID.str.strip().eq("").any():
             raise ValueError(f"{path.name}: missing CARD_ID")
         if not frame.y.isin([0, 1]).all():
             raise ValueError(f"{path.name}: y must be 0 or 1")
-        frame = frame[["CARD_ID", *columns, "y"]].copy()
-        numeric = [c for c in columns if c != "TERMINAL_ID"]
-        if "TERMINAL_ID" in columns:
+        frame = frame[["CARD_ID", *columns, *metadata, "y"]].copy()
+        if "TERMINAL_ID" in metadata:
             if frame.TERMINAL_ID.isna().any() or frame.TERMINAL_ID.str.strip().eq("").any():
                 raise ValueError(f"{path.name}: missing TERMINAL_ID")
-        frame[numeric] = frame[numeric].apply(pd.to_numeric, errors="raise")
-        if not np.isfinite(frame[numeric].to_numpy(dtype=float)).all():
+        frame[columns] = frame[columns].apply(pd.to_numeric, errors="raise")
+        if not np.isfinite(frame[columns].to_numpy(dtype=float)).all():
             raise ValueError(f"{path.name}: features must be finite numeric values")
         frame["y"] = frame.y.astype(int)
         days.append((number, path.name, frame))

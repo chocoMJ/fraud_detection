@@ -10,19 +10,22 @@ Carcillo 관련 저장소의 `main.R`을 참고한 **오류 수정 baseline**이
 
 기본 pickle 실행은 기존 12개 수치 특성에 다음을 추가한다.
 
-- `TERMINAL_ID`: 원핫 인코딩하는 범주형 식별자. 번호 크기를 수치로 학습하지 않는다.
-  인코더는 학습 데이터에서만 학습하며 처음 보는 터미널은 해당 원핫 부분을 0으로 처리한다.
+- `TERMINAL_ID`: 터미널별 이력을 계산하는 그룹 식별자로만 사용하며 모델 X에서는 제외한다.
 - 최근 1·7·30일 각각의 전체 관측 거래 횟수, 라벨 확보 거래 횟수,
   확인된 사기 거래 횟수, 확보 라벨 중 사기 비율: 총 12개 수치 특성.
 
-따라서 인코딩 전 입력은 수치 24개 + 범주형 1개이며, 원핫 변환 후 열 수는 학습 터미널 수에 따라 달라진다.
+따라서 모델 입력은 총 24개의 수치 특성이다. 터미널 ID 원핫 인코딩은 사용하지 않는다.
 `terminal_history.py`에서 날짜별로 계산한다. 당일은 제외하고 직전 달력 일수를 사용한다.
-초기 학습 기간은 전체 라벨, 이후는 조사 대상으로 선정된 카드의 라벨만 다음 날부터 반영한다.
-미조사 거래는 사기 건수나 사기 비율에 사용하지 않는다. 과거 학습 행의 특성도 나중에 얻은 라벨로 덮어쓰지 않는다.
+초기 학습 기간은 전체 라벨을 사용한다. 이후 조사 대상으로 선정된 카드의 라벨은 1일 뒤 도착한다.
+발생 14일 뒤에는 그날의 전체 거래가 지연 라벨 모델에 들어가며, 앞서 조사한 거래도 포함한다.
+이는 논문의 `F_t ⊂ D_t` 정의를 따른 것이다. 모델은 설정된 최근 기간의 라벨을 학습한다.
+터미널의 라벨 확보 건수·사기 건수·사기 비율도 라벨 도착일부터 반영한다.
+피드백으로 먼저 확인한 거래는 14일 뒤 터미널 이력에 중복 집계하지 않는다.
+과거 학습 행의 특성은 나중에 얻은 라벨로 다시 계산하지 않는다.
 라벨이 없으면 비율은 0이며, 라벨 확보 건수를 함께 제공해 실제 0%와 구분할 수 있게 한다.
-이 비율은 조사된 거래에 대한 비율이므로 터미널 전체의 실제 사기율과는 다를 수 있다.
+처음 14일 동안은 조사 피드백의 영향이 크고, 이후에는 도착한 지연 라벨도 비율에 포함된다.
 전체 관측 거래 횟수는 차단 카드의 입력 거래도 포함한다. 기존 12개 특성과 공식 가공 거래 횟수는 유지하며,
-공식 `TERMINAL_ID_RISK_*` 열은 사용하지 않는다. 고객 ID는 여전히 카드 묶음·조사용이며 모델 입력에 넣지 않는다.
+공식 `TERMINAL_ID_RISK_*` 열은 사용하지 않는다. 고객 ID와 터미널 ID는 그룹 식별자로만 유지하고 모델 입력에 넣지 않는다.
 
 ```powershell
 # 터미널 확장 모델 (기본값)
@@ -32,8 +35,36 @@ python -m demo_py.run --strategies N --no-terminal-features --output-dir demo_py
 ```
 
 다른 데이터셋은 두 명령에 같은 `--data-dir`을 지정한다. 기본 결과 폴더에는 확장 실행 시
-`_terminal_history` 접미사를 붙인다. `--features`를 직접 지정하면 `TERMINAL_ID` 포함 여부로
-터미널 이력 추가를 결정한다. 과거 CSV에 터미널 ID가 없으면 기존 수치 특성으로 실행되므로 pickle 입력을 권장한다.
+`_terminal_history` 접미사를 붙인다. 터미널 ID가 메타데이터 열로 있는 경우 터미널 이력을 계산하지만,
+ID 자체는 `--features`로 지정할 수 없다. 과거 CSV에 터미널 ID가 없으면 기존 수치 특성으로 실행되므로 pickle 입력을 권장한다.
+
+라벨 지연 기본값은 `--feedback-delay-days 1 --delayed-label-days 14 --window-days 30`이다.
+`daily_*.csv`의 `delayed_labels_arrived`는 B 모델에 들어온 전체 지연 배치 수이고,
+`new_delayed_labels_arrived`는 그중 피드백으로 미리 확인되지 않았던 신규 라벨 수다.
+랜덤 포레스트 병렬 작업 수는 `--n-jobs`로 지정하며 기본값은 1이다.
+
+### 피드백·지연 라벨 분리 모델
+
+`--learning-mode separated-sliding`은 최근 30일 피드백 RF와 최근 16일 지연 라벨 RF를
+각각 학습하고 두 사기 확률을 0.5:0.5로 결합한다. 실행 중 사용하는 구성 모델은 2개다.
+
+`--learning-mode separated-ensemble`은 같은 피드백 RF를 사용하되, 지연 라벨은 날짜별 RF로
+학습한다. 최근 16개 날짜별 RF의 사기 확률을 먼저 평균한 다음 피드백 RF와 0.5:0.5로 결합한다.
+새 지연 라벨 날짜의 모델만 추가하고 가장 오래된 모델을 제거한다.
+
+두 분리 방식의 각 RF는 기본 100개 트리를 사용한다. `--component-trees`,
+`--feedback-window-days`, `--delayed-window-days`, `--feedback-weight`로 변경할 수 있다.
+초기 7일 워밍업은 지연 모델의 시작점으로 사용하며, 실제 지연 라벨이 도착하기 시작하면 교체된다.
+
+```powershell
+python -m demo_py.run --data-dir demo_py/data/handbook/scenario23_only --strategies N `
+  --learning-mode separated-sliding --n-jobs 8 `
+  --output-dir demo_py/results/scenario23_separated_sliding
+
+python -m demo_py.run --data-dir demo_py/data/handbook/scenario23_only --strategies N `
+  --learning-mode separated-ensemble --n-jobs 8 `
+  --output-dir demo_py/results/scenario23_separated_ensemble
+```
 
 ```text
 demo_py/
@@ -130,7 +161,8 @@ data/handbook/
 | CUSTOMER_ID_NB_TX / AVG_AMOUNT의 1·7·30일 특성 | 동일 이름 | 고객의 거래 횟수·평균 금액 6개 |
 | TERMINAL_ID_NB_TX의 1·7·30일 특성 | 동일 이름 | 공식 전처리의 지연 창 기준 터미널 거래 횟수 3개 |
 
-입력 특성은 총 12개다. 의미를 잃는 `x1` 등의 이름으로 바꾸지 않는다.
+Handbook에서 직접 선택하는 기본 수치 특성은 12개이며, 현재 기본 실행은 여기에 동적으로 계산한
+터미널 이력 12개를 더해 총 24개를 모델에 입력한다. 의미를 잃는 `x1` 등의 이름으로 바꾸지 않는다.
 `TRANSACTION_ID`, `TERMINAL_ID`, 날짜·시간 식별 컬럼, `TX_FRAUD_SCENARIO`는 입력에서 제외한다.
 `TERMINAL_ID_RISK_*` 3개도 제외한다. 공식 risk 특성은 지연된 전체 과거 사기 정답을 이용하지만,
 현재 AL baseline은 조사한 거래의 정답만 이후 학습에 공개하므로 그대로 사용하면 가용 라벨 정책이 달라진다.

@@ -9,6 +9,7 @@ import pandas as pd
 
 from demo_py.data import load_days, load_handbook_days, handbook_source_directory
 from demo_py.data import FEATURES, convert_day
+from demo_py.terminal_history import HISTORY_FEATURES, model_features
 from demo_py.Convert_CSV import convert_pickles
 
 
@@ -42,6 +43,8 @@ class HandbookTests(unittest.TestCase):
             actual, features = load_handbook_days(source)
             expected, csv_features = load_days(csv)
             self.assertEqual(features, csv_features)
+            self.assertNotIn("TERMINAL_ID", features)
+            self.assertIn("TERMINAL_ID", actual[0][2])
             self.assertEqual([d[0] for d in actual], [1, 3])
             for left, right in zip(actual, expected):
                 pd.testing.assert_frame_equal(left[2], right[2])
@@ -61,6 +64,9 @@ class HandbookTests(unittest.TestCase):
         self.assertEqual(result.y.tolist(), [0, 1])
         self.assertEqual(mapping.TRANSACTION_ID.tolist(), [1, 2])
         self.assertEqual(len(FEATURES), 12)
+        self.assertEqual(len(model_features(FEATURES)), 24)
+        self.assertEqual(len(HISTORY_FEATURES), 12)
+        self.assertNotIn("TERMINAL_ID", model_features(FEATURES))
         self.assertFalse(any("RISK" in feature or "FRAUD" in feature for feature in FEATURES))
 
     def test_hidden_labels_do_not_change_features(self):

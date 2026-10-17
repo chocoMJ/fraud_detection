@@ -11,6 +11,7 @@ from demo_py.evaluation import evaluate
 from demo_py.model import fit_forest, positive_probability
 from demo_py.simulation import Config, simulate
 from demo_py.strategies import select_cards
+from demo_py.terminal_history import TerminalHistory
 
 
 def fixture_days(count=12):
@@ -63,18 +64,71 @@ class BaselineTests(unittest.TestCase):
                                           changed_selected.loc[changed_selected.day <= 6, cols])
             for _, row in original_metrics.iterrows():
                 train_days = list(map(int, row.train_days.split(",")))
-                self.assertTrue(all(row.day - 3 <= d < row.day for d in train_days))
+                self.assertTrue(all(row.day - 3 < d <= row.day for d in train_days))
             again, selections_again = simulate(days, ["x1", "x2"], strategy, config)
             pd.testing.assert_frame_equal(original_metrics, again)
             pd.testing.assert_frame_equal(original_selected, selections_again)
 
-    def test_only_selected_labels_enter_next_training_window(self):
-        config = Config(warmup_days=3, window_days=3, budget=4, exploration=1,
+    def test_feedback_labels_enter_training_next_day(self):
+        config = Config(warmup_days=3, window_days=30, budget=4, exploration=1,
                         trees_per_day=1, forest_trees=3)
         daily, _ = simulate(fixture_days(), ["x1", "x2"], "U", config)
         self.assertEqual(daily.iloc[0].window_labeled_rows, 36)
-        self.assertEqual(daily.iloc[1].window_labeled_rows, 28)
-        self.assertEqual(daily.iloc[3].window_labeled_rows, 12)
+        self.assertEqual(daily.iloc[1].feedback_labels_arrived, 4)
+        self.assertEqual(daily.iloc[1].window_labeled_rows, 40)
+        self.assertEqual(daily.iloc[3].window_feedback_rows, 12)
+        self.assertEqual(daily.delayed_labels_arrived.sum(), 0)
+
+    def test_full_day_enters_delayed_model_after_configured_delay(self):
+        config = Config(warmup_days=2, window_days=30, budget=2, exploration=0,
+                        trees_per_day=1, forest_trees=3,
+                        feedback_delay_days=1, delayed_label_days=3)
+        daily, _ = simulate(fixture_days(8), ["x1", "x2"], "N", config)
+        self.assertEqual(daily.iloc[1].feedback_labels_arrived, 2)
+        self.assertEqual(daily.iloc[1].delayed_labels_arrived, 0)
+        # The paper defines feedback as a subset of the later full-day batch.
+        self.assertEqual(daily.iloc[3].delayed_labels_arrived, 12)
+        self.assertEqual(daily.iloc[3].new_delayed_labels_arrived, 10)
+        self.assertEqual(daily.iloc[3].window_delayed_rows, 12)
+
+    def test_combined_mode_replaces_feedback_when_full_delayed_day_arrives(self):
+        config = Config(warmup_days=2, window_days=30, budget=2, exploration=0,
+                        trees_per_day=1, forest_trees=3,
+                        feedback_delay_days=1, delayed_label_days=3)
+        daily, _ = simulate(fixture_days(8), ["x1", "x2"], "N", config)
+        # On day 6: 24 warm-up rows + feedback from days 4/5 (4 rows)
+        # + the complete delayed day 3 (12 rows). Day-3 feedback is replaced,
+        # rather than duplicated, when that delayed batch arrives.
+        self.assertEqual(daily.iloc[3].window_labeled_rows, 40)
+
+    def test_terminal_fraud_history_changes_only_when_label_arrives(self):
+        history = TerminalHistory()
+        transaction = pd.DataFrame({"TERMINAL_ID": ["A"], "y": [1]})
+        history.observe(1, transaction)
+        before = history.transform(2, transaction)
+        self.assertEqual(before.TERMINAL_OBSERVED_TX_1DAY.iloc[0], 1)
+        self.assertEqual(before.TERMINAL_LABELED_TX_1DAY.iloc[0], 0)
+        self.assertEqual(before.TERMINAL_KNOWN_FRAUD_RATE_1DAY.iloc[0], 0)
+        history.reveal(2, transaction)
+        after = history.transform(2, transaction)
+        self.assertEqual(after.TERMINAL_LABELED_TX_1DAY.iloc[0], 1)
+        self.assertEqual(after.TERMINAL_KNOWN_FRAUD_TX_1DAY.iloc[0], 1)
+        self.assertEqual(after.TERMINAL_KNOWN_FRAUD_RATE_1DAY.iloc[0], 1)
+
+    def test_both_separated_learning_modes(self):
+        for mode in ["separated-sliding", "separated-ensemble"]:
+            config = Config(
+                warmup_days=2, budget=2, exploration=0, trees_per_day=1,
+                forest_trees=3, feedback_delay_days=1, delayed_label_days=3,
+                learning_mode=mode, component_trees=1,
+                feedback_window_days=5, delayed_window_days=2,
+            )
+            daily, selected = simulate(fixture_days(8), ["x1", "x2"], "N", config)
+            self.assertEqual(len(daily), 6)
+            self.assertEqual(len(selected), 12)
+            self.assertTrue(daily.model.eq(mode.replace("-", "_")).all())
+            self.assertTrue(daily.feedback_model_available.iloc[1])
+            self.assertGreater(daily.delayed_models.iloc[-1], 0)
 
     def test_single_class_and_empty_prediction(self):
         for label in [0, 1]:
