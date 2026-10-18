@@ -248,7 +248,8 @@ python -m demo_py.run --input-format csv --data-dir path/to/daily_csv
 
 - `daily_U_seed42.csv`: 평가일별 성능, 실제 조사 수, 라벨 확보량, 학습에 사용한 날짜, 차단 제외량.
 - `selected_U_seed42.csv`: 조사 카드 ID, 위험도, 불확실성, 선택 이유, 평가용 카드 정답.
-- `summary.csv`: 전략·시드별 일별 지표 평균 및 조사·발견 카드-일 합계.
+- `summary.csv`: 전략·시드별 일별 지표 평균 및 조사·발견 카드-일 합계. 열 이름은
+  `Days`, `ROC-AUC`, `AP`, `CP`, `NCP`, `Recall`, `Investigated`, `FraudFound`로 짧게 저장한다.
 - `config.json`: 설정, 특성 목록, 라이브러리 버전, 입력 파일 SHA-256.
 
 카드 정답은 **그날 해당 카드 거래 중 하나라도 사기이면 1**이다.
@@ -256,7 +257,7 @@ python -m demo_py.run --input-format csv --data-dir path/to/daily_csv
 `min(설정된 하루 조사 예산, 당일 평가 대상 사기 카드 수)`으로 나눈 값이다.
 위험도 기반 선정과 탐색으로 선정한 카드를 모두 포함한다.
 분모가 0인 날은 NaN이며 평균에서 제외한다.
-`summary.csv`에는 일별 NCP의 평균을 `mean_normalized_card_precision`으로 저장한다.
+`summary.csv`에는 일별 NCP의 평균을 `NCP`로 저장한다.
 `card_precision`은 실제 조사한 고유 카드 중 사기 카드 비율, `card_recall`은
 당일 평가 모집단의 사기 카드 중 발견한 비율이다.
 동일 카드가 여러 날 나타날 수 있으므로 요약 합계는 전체 기간 고유 카드 수가 아닌 **카드-일** 수다.

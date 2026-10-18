@@ -115,11 +115,16 @@ def main():
         found_fraud_card_days=("found_fraud_cards", "sum"),
     ).reset_index()
     summary = summary.rename(columns={
-        "mean_roc_auc": "mean_roc_auc (ROC-AUC)",
-        "mean_average_precision": "mean_average_precision (AP)",
-        "mean_card_precision": "mean_card_precision (CP)",
-        "mean_normalized_card_precision": "mean_normalized_card_precision (NCP)",
-        "mean_card_recall": "mean_card_recall (Recall)",
+        "strategy": "Strategy",
+        "seed": "Seed",
+        "evaluation_days": "Days",
+        "mean_roc_auc": "ROC-AUC",
+        "mean_average_precision": "AP",
+        "mean_card_precision": "CP",
+        "mean_normalized_card_precision": "NCP",
+        "mean_card_recall": "Recall",
+        "investigated_card_days": "Investigated",
+        "found_fraud_card_days": "FraudFound",
     })
     summary.to_csv(args.output_dir / "summary.csv", index=False)
     metadata = {
